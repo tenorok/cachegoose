@@ -1,6 +1,7 @@
 'use strict';
 
 const generateKey = require('./generate-key');
+const recoverObjectId = require('./recover-objectid');
 
 module.exports = function(mongoose, cache) {
   const exec = mongoose.Query.prototype.exec;
@@ -17,7 +18,7 @@ module.exports = function(mongoose, cache) {
 
     const key = this._key || this.getCacheKey();
     const ttl = this._ttl;
-    const isCount = this.op === 'count';
+    const isCount = ['count', 'countDocuments', 'estimatedDocumentCount'].includes(this.op);
     const isLean = this._mongooseOptions.lean;
     const model = this.model.modelName;
 
@@ -32,8 +33,10 @@ module.exports = function(mongoose, cache) {
           if (!isLean) {
             const constructor = mongoose.model(model);
             cachedResults = Array.isArray(cachedResults) ?
-              cachedResults.map(inflateModel(constructor)) :
-              inflateModel(constructor)(cachedResults);
+              cachedResults.map(hydrateModel(constructor)) :
+              hydrateModel(constructor)(cachedResults);
+          } else {
+            cachedResults = recoverObjectId(mongoose, cachedResults);
           }
 
           callback(null, cachedResults);
@@ -85,15 +88,8 @@ module.exports = function(mongoose, cache) {
   };
 };
 
-function inflateModel(constructor) {
+function hydrateModel(constructor) {
   return (data) => {
-    if (constructor.inflate) {
-      return constructor.inflate(data);
-    } else {
-      const model = constructor(data);
-      model.$__reset();
-      model.isNew = false;
-      return model;
-    }
+    return constructor.hydrate(data);
   };
 }

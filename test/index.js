@@ -8,14 +8,11 @@ const Schema = mongoose.Schema;
 
 let RecordSchema;
 let Record;
-let cache;
 let db;
 
 describe('cachegoose', () => {
   before((done) => {
     cachegoose(mongoose);
-
-    cache = cachegoose._cache;
 
     mongoose.connect('mongodb://127.0.0.1/mongoose-cachegoose-testing');
     db = mongoose.connection;
@@ -41,16 +38,17 @@ describe('cachegoose', () => {
 
   afterEach((done) => {
     Record.remove(() => {
-      cache.clear(done);
+      cachegoose.clearCache(null, done);
     });
   });
 
-  it('should throw an error if the mongoose version is less than 3.7', () => {
-    (() => cachegoose({ version: '3.6' })).should.throw();
+  it('should throw an error if the hydrate method exists', () => {
+    const mongoose = { Model: { hydrate: undefined } };
+    (() => cachegoose(mongoose)).should.throw();
   });
 
-  it('should not an error if the mongoose version is greater than 3.7', () => {
-    (() => cachegoose({ version: '3.10' })).should.not.throw();
+  it('should not an error if the hydrage method exists', () => {
+    (() => cachegoose(mongoose)).should.not.throw();
   });
 
   it('should have cache method after initialization', () => {
@@ -298,6 +296,48 @@ describe('cachegoose', () => {
 
     cached.should.equal(0);
   });
+  it('should cache a countDocuments query', async () => {
+    const res = await countDocuments(60);
+    res.should.equal(10);
+
+    await generate(10);
+
+    const cached = await countDocuments(60);
+    cached.should.equal(10);
+  });
+
+  it('should cache a countDocuments query with zero results', async () => {
+    await Record.remove();
+
+    const res = await countDocuments(60);
+    res.should.equal(0);
+
+    await generate(2);
+    const cached = await countDocuments(60);
+
+    cached.should.equal(0);
+  });
+  it('should cache a estimatedDocumentCount query', async () => {
+    const res = await estimatedDocumentCount(60);
+    res.should.equal(10);
+
+    await generate(10);
+
+    const cached = await estimatedDocumentCount(60);
+    cached.should.equal(10);
+  });
+
+  it('should cache a estimatedDocumentCount query with zero results', async () => {
+    await Record.remove();
+
+    const res = await estimatedDocumentCount(60);
+    res.should.equal(0);
+
+    await generate(2);
+    const cached = await estimatedDocumentCount(60);
+
+    cached.should.equal(0);
+  });
 
   it('should correctly cache a query with a sort order', async () => {
     const res = await getAllSorted({ num: 1 });
@@ -310,6 +350,30 @@ describe('cachegoose', () => {
 
     const diffSort = await getAllSorted({ num: -1 });
     diffSort.length.should.equal(20);
+  });
+
+  it('should return similar _id in cached array result for lean', async () => {
+    const originalRes = await getAllLean(60);
+    const cachedRes = await getAllLean(60);
+    const originalConstructor = originalRes[0]._id.constructor.name.should;
+    const cachedConstructor = cachedRes[0]._id.constructor.name.should;
+    originalConstructor.should.deepEqual(cachedConstructor);
+  });
+
+  it('should return similar _id in one cached result for lean', async () => {
+    const originalRes = await getOneLean(60);
+    const cachedRes = await getOneLean(60);
+    const originalConstructor = originalRes._id.constructor.name.should;
+    const cachedConstructor = cachedRes._id.constructor.name.should;
+    originalConstructor.should.deepEqual(cachedConstructor);
+  });
+
+  it('should return similar _id in cached array result for aggregate', async () => {
+    const originalRes = await aggregateAll(60);
+    const cachedRes = await aggregateAll(60);
+    const originalConstructor = originalRes[0]._id.constructor.name.should;
+    const cachedConstructor = cachedRes[0]._id.constructor.name.should;
+    originalConstructor.should.deepEqual(cachedConstructor);
   });
 });
 
@@ -331,6 +395,10 @@ function getAllLean(ttl, cb) {
 
 function getOne(ttl, cb) {
   return Record.findOne({ num: { $gt: 2 } }).cache(ttl).exec(cb);
+}
+
+function getOneLean(ttl, cb) {
+  return Record.findOne({ num: { $gt: 2 } }).lean().cache(ttl).exec(cb);
 }
 
 function getWithSkip(skip, ttl, cb) {
@@ -372,10 +440,30 @@ function count(ttl, cb) {
     .count()
     .exec(cb);
 }
+function countDocuments(ttl, cb) {
+  return Record.find({})
+    .cache(ttl)
+    .countDocuments()
+    .exec(cb);
+}
+function estimatedDocumentCount(ttl, cb) {
+  return Record.find({})
+    .cache(ttl)
+    .estimatedDocumentCount()
+    .exec(cb);
+}
 
 function aggregate(ttl, cb) {
   return Record.aggregate()
     .group({ _id: null, total: { $sum: '$num' } })
+    .cache(ttl)
+    .exec(cb);
+}
+
+function aggregateAll(ttl, cb) {
+  return Record.aggregate([
+    { $match: {} },
+  ])
     .cache(ttl)
     .exec(cb);
 }
